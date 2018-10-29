@@ -4,13 +4,14 @@ const bodyParser = require('body-parser');
 const express = require('express');
 
 let app = express();
-
-let clientId = '<clientID>';
-let clientSecret = '<client secret>';
-let refreshToken = '<refresh token>';
+let clientId = '';
+let clientSecret = '';
+let refreshToken = '';
 let deviceId = '';
-let error = false;
-
+let queue = [];
+let EOS = false;
+let loop = 0;
+let duration = 0;
 
 app.use(bodyParser.urlencoded({
 	extended: false
@@ -23,70 +24,80 @@ let spotifyApi = new SpotifyWebApi({
 });
 
 function tokenRefresh() {
-	refresh(refreshToken, clientId, clientSecret, function(err, res, body){
-	if (err) return
-	spotifyApi.setAccessToken(body.access_token);
+	refresh(refreshToken, clientId, clientSecret, function (err, res, body) {
+		if (err) return
+		console.log(body.access_token);
+		spotifyApi.setAccessToken(body.access_token);
 	});
 }
 
-setInterval(tokenRefresh, 3400000)
+setInterval(tokenRefresh, 30000);
 
-// when the app recieves data
-app.post('/', function(req, res) {
+app.post('/', function (req, res) {
 	let input = req.body.text;
-
-	/*if the input was a number, change volume, otherwise,
-	try to find a song using the users input*/
-	if(typeof(parseInt(input, 10))) {
-		changeVolume(parseInt(input, 10));
-		res.send('Changed volume to: ' + input)
+	console.log(input);
+	if (isNaN(input)) {
+		searchSong(input);
+		res.send("added " + input + " to the queue");
 	} else {
-		searchSong(req.body.text);
-		if (error) {
-			res.send("could not find " + input);
-		} else {
-			res.send("now playing: " + input);
-		}
+		changeVolume(input);
+		res.send("volume changed to: " + input);
+		console.log("vol: " + input)
 	}
 });
 
 function changeVolume(vol) {
-	spotifyApi.changeVolume(vol);
+	spotifyApi.setVolume(vol);
 }
 
 function playSong(trackUri) {
 	spotifyApi.play({
-		uris: [trackUri],
+		uris: trackUri,
 		device_id: deviceId
 	});
 }
 
 function searchSong(searchQuery) {
 	spotifyApi.searchTracks(searchQuery, {limit: 1})
-	.then(function(data) {
-		let trackUri = data.body.tracks.items[0].uri;
-		playSong(trackUri);
-	}), function(err) {
-		console.log(err);
-		error = true;
-	}
+		.then(function (data) {
+			let trackUri = data.body.tracks.items[0].uri;
+			let duration = data.body.tracks.items[0].duration_ms;
+			// console.log(duration)
+
+			queue.push(trackUri);
+			if(!EOS) {
+				playSong(queue);
+			}
+			
+			setTimeout(songTimer, duration);
+		});
 }
 
-function findDevice() {
-	spotifyApi.getMyDevices().then(function(data) {
-		let deviceList = data.body.devices;
+function songTimer() {
+	console.log("removed");
+	console.log(queue)
+	queue.splice(0, 1);
+	console.log(queue)
+	EOS = true;
+	playSong(queue);
+}
 
-		for(let device of deviceList) {
-			if(device.name == '<device name>') {
+// setTimeout(songTimer, duration)
+
+
+function findDevice() {
+	spotifyApi.getMyDevices().then(function (data) {
+		let deviceList = data.body.devices;
+		for (let device of deviceList) {
+			if (device.name == "Stuart's Echo") {
 				deviceId = device.id;
 			} else {
-				// do nothing
+				//do nothing
 			}
 		}
 	});
 }
-
-tokenRefresh();
 findDevice();
-
+tokenRefresh();
+spotifyApi.pause()
 module.exports = app;
